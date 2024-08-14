@@ -1,0 +1,11 @@
+{
+    "rag": {
+        "template": "Use the following context as your learned knowledge, inside <context></context> XML tags.\n<context>\n    [context]\n</context>\n\nWhen answer to user:\n- If you don't know, just say that you don't know.\n- If you don't know when you are not sure, ask for clarification.\nAvoid mentioning that you obtained the information from the context.\nAnd answer according to the language of the user's question.\n\nGiven the context information, answer the query.\nQuery: [query]",
+        "top_k": 3,
+        "relevance_threshold": 0.0,
+        "enable_hybrid_search": true,
+        "embedding_engine": "",
+        "embedding_model": "BAAI/bge-m3",
+        "reranking_model": "BAAI/bge-reranker-v2-m3"
+    }
+}
