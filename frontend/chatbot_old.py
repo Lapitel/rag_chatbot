@@ -1,19 +1,3 @@
-import streamlit as st
-import base64
-
-with st.sidebar:
-    file_uploader = st.file_uploader(label="", accept_multiple_files=True, label_visibility='visible')
-
-    if file_uploader is not None:
-        file_contents = file_uploader.read()
-        encoded_data = base64.b64encode(file_contents).decode('utf-8')
-        title = file_uploader.name.strip()
-    else:
-        encoded_data, title = '', ''
-
-if user_input := st.chat_input("질문을 입력해주세요"):
-    pass
-
 a='''
 import os
 import sys
