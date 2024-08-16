@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
+import json
 import logging
 from fastapi import (
     FastAPI,
@@ -36,6 +37,7 @@ app = FastAPI(
 @app.post("/file")
 def upload_file(file: UploadFile = File(...)):
     try:
+        log.info(f"upload_file(): {file.filename}")
         # metadata
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
@@ -73,20 +75,27 @@ class FileInfo(BaseModel):
     name: str
 
 @app.post("/indexing")
-def upload_file(file_info: FileInfo):
-    log.info(file_info)
-    # get loader
-    loader = index.get_loader(file_info.file_id)
-    data = loader.load()
-    # split chunk
-    docs = index.get_split_docs(data)
-    # embedding
-    if len(docs) > 0:
-        texts = [doc.page_content for doc in docs]
-        metadatas = [{**doc.metadata, **(file_info if file_info else {})} for doc in docs]
-    # store vector DB
-    
-    return file_info
+def indexing(file_info: FileInfo):
+    try:
+        log.info(f"indexing(): {file_info}")
+        # get loader
+        loader = index.get_loader(file_info.file_id)
+        data = loader.load()
+        # split chunk
+        docs = index.get_split_docs(data)
+        # embedding
+        if len(docs) > 0:
+            texts = [doc.page_content for doc in docs]
+            metadatas = [{**doc.metadata, **file_info.dict()} for doc in docs]
+        # store vector DB
+        
+        return {"file_id": file_info.file_id, "name": file_info.name, "docs_count": len(docs)}
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 # generation parameters
 class GenerateRequest(CustomUserType):
@@ -171,4 +180,5 @@ class GenerateRequest(CustomUserType):
 #     return process_file(input)['docs']
 
 if __name__ == "__main__":
-    uvicorn.run('main:app', host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run('main:app', host="0.0.0.0", port=8080)
+    # uvicorn.run('main:app', host="0.0.0.0", port=8080, reload=True)

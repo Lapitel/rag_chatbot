@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
+import json
 import streamlit as st
 import requests
 import asyncio
@@ -31,36 +32,41 @@ with st.sidebar:
         upload_msg_layer = st.empty()
         upload_msg_layer.info("Uploading files...")
 
-        async def upload_files(files):
-            async def async_post(session, url, data, filename):
-                async with session.post(url, data=data) as response:
+        async def upload_file(file):
+            async def async_post(session, url, filename, data=None, json=None):
+                async with session.post(url, data=data, json=json) as response:
                     if response.status == 200:
                         return await response.text()
                     else:
                         st.error(f"Failed to upload {filename}")
-                    
-            async with aiohttp.ClientSession() as session:                
-                for file in files:
-                    # file upload
-                    file_data = file.getvalue()
-                    upload_form = aiohttp.FormData()
-                    upload_form.add_field(
-                        'file',
-                        file_data,
-                        filename=file.name
-                    )
-                    file_info = await async_post(session, url=f"{BACKEND_URL}/file", data=upload_form, filename=file.name)
-
+            
+            async with aiohttp.ClientSession() as session:
+                # file upload
+                file_data = file.getvalue()
+                upload_form = aiohttp.FormData()
+                upload_form.add_field(
+                    'file',
+                    file_data,
+                    filename=file.name
+                )
+                file_info = await async_post(session, url=f"{BACKEND_URL}/file", filename=file.name, data=upload_form)
+                if file_info:
+                    print(f"if after")
+                    # convert txt -> dict
+                    file_info = json.loads(file_info)
+                    print(f"json after")
                     # file indexing
-                    index_form = aiohttp.FormData()
-                    index_form.add_field(
-                        'file_info',
-                        file_info
-                    )
-                    await async_post(session, url=f"{BACKEND_URL}/indexing", data=index_form, filename=file.name)
-
+                    file_info = await async_post(session, url=f"{BACKEND_URL}/indexing", filename=file.name, json=file_info)
+                    print(f"async_post after")
+                    if file_info:
+                        st.session_state["uploaded_file_ids"].append(json.loads(file_info))
+        
         # 비동기 파일 업로드 실행
-        asyncio.run(upload_files(uploaded_files))
+        async def async_run(files):
+            await asyncio.gather(*[upload_file(file) for file in files])
+        
+        asyncio.run(async_run(uploaded_files))
+        
         if len(st.session_state["uploaded_file_ids"]) == len(uploaded_files):
             upload_msg_layer.success("Files uploaded successfully!")
 
