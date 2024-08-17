@@ -26,5 +26,6 @@ except:
 GLOBAL_LOG_LEVEL = "INFO"
 LOG_DIR = Path(os.path.join(BACKEND_DIR, "logs")).resolve()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-BACKEND_LOG_FILE = Path(os.path.join(LOG_DIR, "backend.log")).touch()
+BACKEND_LOG_FILE = os.path.join(LOG_DIR, "backend.log")
+Path(BACKEND_LOG_FILE).touch()
 logging.basicConfig(filename=BACKEND_LOG_FILE, level=GLOBAL_LOG_LEVEL, format="[%(asctime)s %(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")

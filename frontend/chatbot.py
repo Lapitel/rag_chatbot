@@ -34,7 +34,7 @@ with st.sidebar:
 
         async def upload_file(file):
             async def async_post(session, url, filename, data=None, json=None):
-                async with session.post(url, data=data, json=json) as response:
+                async with session.post(url, data=data, json=json, timeout=aiohttp.ClientTimeout(total=600)) as response:
                     if response.status == 200:
                         return await response.text()
                     else:

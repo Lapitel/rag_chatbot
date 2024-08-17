@@ -81,13 +81,14 @@ def indexing(file_info: FileInfo):
         # get loader
         loader = index.get_loader(file_info.file_id)
         data = loader.load()
+        log.info(f"indexing() len(data): {len(data)}")
         # split chunk
         docs = index.get_split_docs(data)
+        log.info(f"indexing() len(docs): {len(docs)}")
         # embedding
-        if len(docs) > 0:
-            texts = [doc.page_content for doc in docs]
-            metadatas = [{**doc.metadata, **file_info.dict()} for doc in docs]
+        embeddings = index.load_embedding()
         # store vector DB
+        index.store_docs_in_vector_db(docs=docs, embeddings=embeddings, file_info={"file_id": file_info.file_id, "name": file_info.name})
         
         return {"file_id": file_info.file_id, "name": file_info.name, "docs_count": len(docs)}
     except Exception as e:
