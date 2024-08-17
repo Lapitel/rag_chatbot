@@ -4,6 +4,7 @@ sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import json
 import logging
+from typing import List
 from fastapi import (
     FastAPI,
     UploadFile,
@@ -13,8 +14,14 @@ from fastapi import (
 )
 import uuid
 import uvicorn
-from pydantic import BaseModel
+from langchain_core.pydantic_v1 import BaseModel, Field
 from langserve import add_routes, CustomUserType
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain.schema.runnable import RunnableLambda
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from langchain_community.chat_message_histories.file import FileChatMessageHistory
+from langchain_core.messages import BaseMessage
 
 from config import (
     GLOBAL_LOG_LEVEL,
@@ -23,6 +30,8 @@ from config import (
 )
 
 from apps import index
+from apps import search
+from apps.utils import get_last_user_message
 
 # log setting
 log = logging.getLogger(__name__)
@@ -70,27 +79,26 @@ def upload_file(file: UploadFile = File(...)):
             detail=e
         )
 
-class FileInfo(BaseModel):
+class IndexParams(BaseModel):
     file_id: str
     name: str
+    extract_images: bool
 
 @app.post("/indexing")
-def indexing(file_info: FileInfo):
+def indexing(index_params: IndexParams):
     try:
-        log.info(f"indexing(): {file_info}")
+        log.info(f"indexing(): {index_params}")
         # get loader
-        loader = index.get_loader(file_info.file_id)
+        loader = index.get_loader(index_params.file_id, extract_images=index_params.extract_images)
         data = loader.load()
         log.info(f"indexing() len(data): {len(data)}")
         # split chunk
-        docs = index.get_split_docs(data)
+        docs = index.get_split_docs(data, index_params.name)
         log.info(f"indexing() len(docs): {len(docs)}")
-        # embedding
-        embeddings = index.load_embedding()
         # store vector DB
-        index.store_docs_in_vector_db(docs=docs, embeddings=embeddings, file_info={"file_id": file_info.file_id, "name": file_info.name})
+        index.store_docs_in_vector_db(docs=docs, collection_name=index_params.file_id)
         
-        return {"file_id": file_info.file_id, "name": file_info.name, "docs_count": len(docs)}
+        return {"file_id": index_params.file_id, "name": index_params.name, "docs_count": len(docs)}
     except Exception as e:
         log.exception(e)
         raise HTTPException(
@@ -98,62 +106,51 @@ def indexing(file_info: FileInfo):
             detail=str(e)
         )
 
+llm = ChatOpenAI()
 # generation parameters
 class GenerateRequest(CustomUserType):
-    collection_names: list[str] = None
-    prompt: str
+    file_infos: list[dict] = None
+    messages: list[dict]
 
-# def process_file(request: GenerateRequest):
-#     if request.files:
-#         for file in files:
-#             file.
-#         content = base64.decodebytes(request.file.encode("utf-8"))
-#         # # 파일의 해시값 계산
-#         # file_hash = hashlib.sha256(content)
-#         # hex_dig = file_hash.hexdigest()
-#         # # 해시값 압축 (byte)
-#         # compress_hash = base64.b64encode(bytes.fromhex(hex_dig))
-#         # # 해시값에 슬러시(/)가 존재할 경우 에러발생. 언더바(_)로 치환
-#         # filename = compress_hash.decode('utf-8').replace("/","_")
-#         filePath = os.path.join(config["api_path"], 'upload_file_temp', request.file_name)
-#         #파일 저장
-#         with open(filePath, "wb") as file:
-#             file.write(content)
+def generate(request: GenerateRequest):
+    context = ""
+    citations = []
+    # search
+    if request.file_infos:
+        contexts, citations = search.get_rag_context(
+            file_infos=request.file_infos,
+            messages=request.messages,
+            k=CONFIG_DATA['rag']['top_k'],
+            r=CONFIG_DATA['rag']['relevance_threshold'],
+            llm
+        )
+        context = "/n".join(contexts).strip()
 
-#         filenames.append(filePath)
-#     if request.uploaded_filenames:
-#         #디렉토리여부 확인
-#         for filename in request.uploaded_filenames:
-#             filePath = os.path.join(config["api_path"], config["upload_file_path"], filename)
-#             if os.path.isdir(filePath):
-#                 for root, dirs, files in os.walk(filePath):
-#                 # 하위 파일들을 filenames 리스트에 추가
-#                     for file in files:
-#                         filenames.append(os.path.join(root, file))
-#             elif os.path.isfile(filename):
-#                 filenames.append(filePath)
-#         #filenames.extend(request.uploaded_filenames)
-    
-#     #검색
-#     if filenames:
-#         docs = retriever.getRetriverDocuments(filenames, request.question, request.test_args)
-#         if docs: 
-#             context = "\n\n".join([x.page_content for x in docs])
+    return {"contexts": context, "chat_history": request.messages[:-1], "question": get_last_user_message(request.messages), "citations": citations}
 
-#     return {"context": context, "question": request.question, "docs": docs if docs else []}
+prompt = ChatPromptTemplate.from_messages([
+    ("system","""Use the following context as your learned knowledge, inside <context></context> XML tags.
+                <context>
+                    {context}
+                </context>
 
-# chain_with_history = RunnableWithMessageHistory(
-#     chain.getChain(llm_name=config['use_llm']),
-#     lambda session_id: CustomHistory(session_id, url=f"redis://{config['redis_url']}/0", logfile_path=os.path.join(config["api_path"],"logs")),
-#     input_messages_key="question",
-#     history_messages_key="history"
-# )
+                When answer to user:
+                - If you don't know, just say that you don't know.
+                - If you don't know when you are not sure, ask for clarification.
+                Avoid mentioning that you obtained the information from the context.
+                And answer according to the language of the user's question.
 
-# add_routes(
-#     app,
-#     RunnableLambda(process_file).with_types(input_type=FileProcessingRequest) | chain_with_history,
-# #    enabled_endpoints=("invoke", "stream", "stream_log", "playground")
-# )
+                Given the context information, answer the query.
+                Query: """),
+    MessagesPlaceholder(variable_name="history"),
+    ("human", "{question}")
+])
+
+add_routes(
+    app,
+    RunnableLambda(generate).with_types(input_type=GenerateRequest),
+    prompt | ChatOpenAI()
+)
 
 # @app.get("/generate_session_id")
 # def generate_session_id():

@@ -51,15 +51,14 @@ with st.sidebar:
                 )
                 file_info = await async_post(session, url=f"{BACKEND_URL}/file", filename=file.name, data=upload_form)
                 if file_info:
-                    print(f"if after")
                     # convert txt -> dict
-                    file_info = json.loads(file_info)
-                    print(f"json after")
+                    index_params = json.loads(file_info)
+                    index_params['extract_images'] = False
                     # file indexing
-                    file_info = await async_post(session, url=f"{BACKEND_URL}/indexing", filename=file.name, json=file_info)
-                    print(f"async_post after")
-                    if file_info:
-                        st.session_state["uploaded_file_ids"].append(json.loads(file_info))
+                    result = await async_post(session, url=f"{BACKEND_URL}/indexing", filename=file.name, json=index_params)
+                    
+                    if result:
+                        st.session_state["uploaded_file_ids"].append(json.loads(result))
         
         # 비동기 파일 업로드 실행
         async def async_run(files):
