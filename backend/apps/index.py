@@ -1,5 +1,6 @@
 import os
 import logging
+import urllib.parse
 
 from typing import List
 from config import (GLOBAL_LOG_LEVEL, UPLOAD_DIR, CONFIG_DATA, CHROMA_DATA_PATH)
@@ -25,7 +26,7 @@ def get_split_docs(data: List[Document], filename:str):
     )
     docs = text_splitter.split_documents(data)
     # insert filename to split_docs
-    [setattr(doc, 'page_content', f"{filename}\n\n{doc.page_content}") for doc in docs]
+    [setattr(doc, 'page_content', f"{urllib.parse.unquote(filename)}\n\n{doc.page_content}") for doc in docs]
 
     return docs
 
