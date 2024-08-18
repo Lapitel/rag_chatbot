@@ -46,8 +46,10 @@
   ```
 3. frontend
   ```bash
-  streamlit run .\frontend\chatbot.py
+  streamlit run ./frontend/chatbot.py
   ```
+4. chatbot URL 접속
+- http://{{ip}}:8501/
 
 ### 한계점
 - PDF -> Vector DB 저장과정이 비동기로 실행되나, 작업에 있어 시간이 많이 소요됨. 비동기처리 완성도가 부족하여 웹화면 로딩걸림.
@@ -64,3 +66,4 @@
 
 ### 참고사항
 - 임베딩 속도가 느려, vector_db를 함께 업로드 함. (파일이름과 사이즈가 같은 파일 업로드시 임베딩 과정 생략)
+- 최초 색인, 검색시 임베딩모델 및 리랭킹용 모델을 다운로드 받기 때문에, 생성속도가 느림.
