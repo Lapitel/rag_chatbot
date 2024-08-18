@@ -50,10 +50,10 @@ with st.sidebar:
                 file_info = await async_post(session, url=f"{BACKEND_URL}/file", filename=file.name, data=upload_form)
                 if file_info:
                     # convert txt -> dict
-                    print(f"upload_file result: {file_info}")
+                    # print(f"upload_file result: {file_info}")
                     index_params = json.loads(file_info)
                     index_params['extract_images'] = False
-                    print(f"indexing params: {index_params}")
+                    # print(f"indexing params: {index_params}")
                     # file indexing
                     result = await async_post(session, url=f"{BACKEND_URL}/indexing", filename=file.name, json=index_params)
                     
@@ -79,8 +79,8 @@ if prompt := st.chat_input():
     st.chat_message("user").write(prompt)
     
     with st.spinner('답변 생성중'):
-        print(st.session_state.messages)
-        print(st.session_state.uploaded_file_ids)
+        # print(st.session_state.messages)
+        # print(st.session_state.uploaded_file_ids)
         searchResult = requests.post(f"{BACKEND_URL}/search",
                                     json={
                                         "file_infos": st.session_state.uploaded_file_ids,
@@ -90,7 +90,7 @@ if prompt := st.chat_input():
         content = json.loads(searchResult.content.decode('utf-8'))
         tooltips = []
         for citation in content['citations']:
-            print(citation)
+            # print(citation)
             if citation['document']:
                 title = urllib.parse.unquote(citation['source'])
                 for i in range(len(citation['document'])):
@@ -103,8 +103,8 @@ if prompt := st.chat_input():
         response = requests.post(f"{BACKEND_URL}/invoke",
                                     json={
                                     "input": {
-                                        "file_infos": st.session_state.uploaded_file_ids,
-                                        "messages": st.session_state.messages
+                                        "context": content['context'],
+                                        "question": content['question']
                                     },
                                     "config": {},
                                     "kwargs": {}
@@ -115,7 +115,7 @@ if prompt := st.chat_input():
                                     )
         if response.ok:
             content = json.loads(response.content.decode('utf-8'))
-            print(f"generate result: {content}")
+            # print(f"generate result: {content}")
             msg = content['output']
             st.session_state.messages.append({"role": "assistant", "content": msg})
             st.chat_message("assistant").write(msg)

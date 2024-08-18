@@ -160,7 +160,7 @@ prompt = ChatPromptTemplate.from_messages([
 
 add_routes(
     app,
-    {'context': RunnablePassthrough(), 'question': RunnablePassthrough()} | prompt | llm | StrOutputParser()
+    prompt | llm | StrOutputParser()
 )
 
 if __name__ == "__main__":
