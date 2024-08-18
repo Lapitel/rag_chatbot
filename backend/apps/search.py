@@ -1,11 +1,11 @@
 import logging
-from config import (GLOBAL_LOG_LEVEL)
+from config import (GLOBAL_LOG_LEVEL, CONFIG_DATA)
 from typing import List
 
-from utils import (
+from apps.utils import (
     get_last_user_message, 
     load_embedding, 
-    load_sentence_transformer_rf, 
+    load_sentence_transformer, 
     get_collection_from_vector_store, 
     get_vector_store,
     get_contextualize_query,
@@ -32,31 +32,26 @@ def query_doc_with_hybrid_search(
     try:
         collection = get_collection_from_vector_store(collection_name=collection_name)
         documents = collection.get()  # get all documents
-
+        
         bm25_retriever = BM25Retriever.from_texts(
             texts=documents.get("documents"),
             metadatas=documents.get("metadatas"),
         )
         bm25_retriever.k = k
-
         chroma_vector_store = get_vector_store(collection_name=collection_name)
         chroma_retriever = chroma_vector_store.as_retriever(search_kwargs={"k": k})
-
         ensemble_retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, chroma_retriever], weights=[0.5, 0.5]
         )
-
         compressor = RerankCompressor(
             embedding_function=embedding_function,
             top_n=k,
             reranking_function=reranking_function,
             r_score=r,
         )
-
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor, base_retriever=ensemble_retriever
         )
-
         result = compression_retriever.invoke(query)
         result = {
             "distances": [[d.metadata.get("score") for d in result]],
@@ -64,10 +59,11 @@ def query_doc_with_hybrid_search(
             "metadatas": [[d.metadata for d in result]],
         }
 
-        log.info(f"query_doc_with_hybrid_search:result {result}")
+        # log.info(f"query_doc_with_hybrid_search() result: {result}")
         
         return result
     except Exception as e:
+        print(e)
         raise e
     
 def merge_and_sort_query_results(query_results, k, reverse=False):
@@ -119,6 +115,7 @@ def query_collection_with_hybrid_search(
     r: float,
 ):
     results = []
+    # log.info(f'query_collection_with_hybrid_search() collection_names:{collection_names}')
     for collection_name in collection_names:
         try:
             result = query_doc_with_hybrid_search(
@@ -130,14 +127,15 @@ def query_collection_with_hybrid_search(
                 r=r,
             )
             results.append(result)
-        except:
-            pass
+        except Exception as e:
+            print(e)
     return merge_and_sort_query_results(results, k=k, reverse=True)
 
 def get_rag_context(file_infos, messages, k, r, llm):
     query = get_last_user_message(messages)
     history = messages[:-1]
     if history:
+        # rag_query = query
         rag_query = get_contextualize_query(llm, query, history)
 
     extracted_collections = []
@@ -145,20 +143,19 @@ def get_rag_context(file_infos, messages, k, r, llm):
 
     for file_info in file_infos:
         context = None
-
-        collection_names = file_info.file_id
+        collection_names = [file_info['file_id']]
         collection_names = set(collection_names).difference(extracted_collections)
         if not collection_names:
-            log.debug(f"skipping {file_info.name} as it has already been extracted")
+            log.debug(f"skipping {file_info['name']} as it has already been extracted")
             continue
 
         try:
             context = query_collection_with_hybrid_search(
                         collection_names=collection_names,
                         query=rag_query,
-                        embedding=load_embedding(),
+                        embedding_function=load_sentence_transformer(CONFIG_DATA['rag']['embedding_model']),
                         k=k,
-                        reranking=load_sentence_transformer_rf(),
+                        reranking_function=load_sentence_transformer(CONFIG_DATA['rag']['reranking_model']),
                         r=r,
                     )
         except Exception as e:
@@ -166,11 +163,11 @@ def get_rag_context(file_infos, messages, k, r, llm):
             context = None
 
         if context:
-            relevant_contexts.append({**context, "source": file_info.name})
+            relevant_contexts.append({**context, "source": file_info['name']})
 
         extracted_collections.extend(collection_names)
 
-        contexts = []
+    contexts = []
     citations = []
 
     for context in relevant_contexts:
@@ -194,3 +191,14 @@ def get_rag_context(file_infos, messages, k, r, llm):
             log.exception(e)
 
     return contexts, citations
+
+if __name__=='__main__':
+    print(
+    query_doc_with_hybrid_search(
+        collection_name='13ff8914-ba25-4bec-80b6-61b5b5b7ab9c',
+        query='논문에서 제시된 vector DB중 어떤것이 가장 좋아?',
+        embedding_function=load_sentence_transformer(CONFIG_DATA['rag']['embedding_model']),
+        reranking_function=load_sentence_transformer(CONFIG_DATA['rag']['reranking_model']),
+        k=CONFIG_DATA['rag']['top_k'],
+        r=CONFIG_DATA['rag']['relevance_threshold'],
+    ))

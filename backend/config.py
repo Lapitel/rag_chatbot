@@ -19,7 +19,9 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # vector db path
 CHROMA_DATA_PATH = os.path.join(DATA_DIR, 'vector_db')
 
+# 임베딩 모델 다운로드 경로
 SENTENCE_TRANSFORMERS_HOME = os.path.join(DATA_DIR, "cache", "embedding", "models")
+Path(SENTENCE_TRANSFORMERS_HOME).mkdir(parents=True, exist_ok=True)
 
 try:
     CONFIG_DATA = json.loads((DATA_DIR / "config.json").read_text())

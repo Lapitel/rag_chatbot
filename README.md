@@ -14,7 +14,9 @@
 
 ### 전제 조건
 - GPU 필요 (임베딩 모델 로컬 동작을 위해)
+- CUDA 설치 필요
 - Python 3.11 필요
+- Streamlit 설치 필요
 - OPENAI API Key 필요
 
 ### 설치 방법
@@ -32,6 +34,16 @@
   ```
 
 ### 시작하기
+- backend
   ```bash
+  cd backend
   python main.py
   ```
+- frontend
+  ```bash
+  streamlit run .\frontend\chatbot.py
+  ```
+
+### 한계점
+- PDF -> Vector DB 저장과정이 비동기로 실행되나, 작업에 있어 시간이 많이 소요됨
+- Frontend -> Backend로 대화 생성시, 업로드가 다시 요청됨 (단, 파일이름과 사이즈로 중복작업은 제거)

@@ -3,6 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import json
+import time
 import streamlit as st
 import requests
 import asyncio
@@ -19,16 +20,13 @@ if "uploaded_file_ids" not in st.session_state:
     st.session_state["uploaded_file_ids"] = []
 
 # sidebar section
-with st.sidebar:
-    # openai api key
-    openai_api_key = st.text_input("OpenAI API Key", key="chatbot_api_key", type="password")
-    
+with st.sidebar:    
     # file upload
     uploaded_files = st.file_uploader(
         "Choose a PDF file", accept_multiple_files=True
     )
     # process file upload
-    if uploaded_files:
+    if uploaded_files:            
         upload_msg_layer = st.empty()
         upload_msg_layer.info("Uploading files...")
 
@@ -52,8 +50,10 @@ with st.sidebar:
                 file_info = await async_post(session, url=f"{BACKEND_URL}/file", filename=file.name, data=upload_form)
                 if file_info:
                     # convert txt -> dict
+                    print(f"upload_file result: {file_info}")
                     index_params = json.loads(file_info)
                     index_params['extract_images'] = False
+                    print(f"indexing params: {index_params}")
                     # file indexing
                     result = await async_post(session, url=f"{BACKEND_URL}/indexing", filename=file.name, json=index_params)
                     
@@ -66,7 +66,7 @@ with st.sidebar:
         
         asyncio.run(async_run(uploaded_files))
         
-        if len(st.session_state["uploaded_file_ids"]) == len(uploaded_files):
+        if len(st.session_state.uploaded_file_ids) >= len(uploaded_files):
             upload_msg_layer.success("Files uploaded successfully!")
 
 # chat section
@@ -75,25 +75,30 @@ for msg in st.session_state.messages:
 
 # generate AI message
 if prompt := st.chat_input():
-    if not openai_api_key:
-        st.info("Please add your OpenAI API key to continue.")
-        st.stop()
-
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
     
     with st.spinner('답변 생성중'):
+        print(st.session_state.messages)
+        print(st.session_state.uploaded_file_ids)
         response = requests.post(f"{BACKEND_URL}/invoke",
                                     json={
-                                        "openai_api_key": openai_api_key,
-                                        "prompt": prompt,
-                                        "files": st.session_state.uploaded_file_ids
+                                    "input": {
+                                        "file_infos": st.session_state.uploaded_file_ids,
+                                        "messages": st.session_state.messages
+                                    },
+                                    "config": {},
+                                    "kwargs": {}
                                     },
                                     headers={
-                                        'accept': 'application/json',
                                         'Content-Type': 'application/json'
                                         }
                                     )
-        msg = response.choices[0].message.content
-        st.session_state.messages.append({"role": "assistant", "content": msg})
-        st.chat_message("assistant").write(msg)
+        if response.ok:
+            content = json.loads(response.content.decode('utf-8'))
+            print(f"generate result: {content}")
+            msg = content['output']
+            st.session_state.messages.append({"role": "assistant", "content": msg})
+            st.chat_message("assistant").write(msg)
+        else:
+            st.error(response)

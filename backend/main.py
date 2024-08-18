@@ -1,10 +1,8 @@
-import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-
-import json
 import logging
-from typing import List
+import getpass
+os.environ["OPENAI_API_KEY"] = getpass.getpass("OpenAI API Key:")
+
 from fastapi import (
     FastAPI,
     UploadFile,
@@ -14,24 +12,23 @@ from fastapi import (
 )
 import uuid
 import uvicorn
-from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.pydantic_v1 import BaseModel
 from langserve import add_routes, CustomUserType
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain.schema.runnable import RunnableLambda
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-from langchain_community.chat_message_histories.file import FileChatMessageHistory
-from langchain_core.messages import BaseMessage
 
 from config import (
     GLOBAL_LOG_LEVEL,
     UPLOAD_DIR,
-    CONFIG_DATA
+    CONFIG_DATA,
+    DATA_DIR
 )
 
 from apps import index
 from apps import search
-from apps.utils import get_last_user_message
+from apps.utils import get_last_user_message, search_file_db, insert_file_db, update_index_complete
 
 # log setting
 log = logging.getLogger(__name__)
@@ -51,6 +48,13 @@ def upload_file(file: UploadFile = File(...)):
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
         file_ext = filename.split(".")[-1].lower()
+        file_size = file.size
+        
+        # 파일관리 DB 검색 - 중복방지
+        result = search_file_db(filename=filename, file_size=file_size)
+        if result:
+            return {'file_id': result['file_id'], 'name': result['name']}
+            
         id = str(uuid.uuid4())
         file_path = os.path.join(UPLOAD_DIR, id)
         contents = file.file.read()
@@ -70,7 +74,7 @@ def upload_file(file: UploadFile = File(...)):
         with open(file_path, "wb") as f:
             f.write(contents)
             f.close()
-
+        insert_file_db(id, filename, file_size)
         return {'file_id': id, 'name': filename}
     except Exception as e:
         log.exception(e)
@@ -88,6 +92,11 @@ class IndexParams(BaseModel):
 def indexing(index_params: IndexParams):
     try:
         log.info(f"indexing(): {index_params}")
+        # 파일관리 DB 검색 - 중복작업방지
+        result = search_file_db(file_id=index_params.file_id)
+        if result and result['docs_count'] > 0:
+            return {'file_id': result['file_id'], 'name': result['name'], "docs_count": result['docs_count']}
+        
         # get loader
         loader = index.get_loader(index_params.file_id, extract_images=index_params.extract_images)
         data = loader.load()
@@ -98,6 +107,7 @@ def indexing(index_params: IndexParams):
         # store vector DB
         index.store_docs_in_vector_db(docs=docs, collection_name=index_params.file_id)
         
+        update_index_complete(index_params.file_id, len(docs))
         return {"file_id": index_params.file_id, "name": index_params.name, "docs_count": len(docs)}
     except Exception as e:
         log.exception(e)
@@ -106,7 +116,7 @@ def indexing(index_params: IndexParams):
             detail=str(e)
         )
 
-llm = ChatOpenAI()
+llm = ChatOpenAI(model="gpt-3.5-turbo")
 # generation parameters
 class GenerateRequest(CustomUserType):
     file_infos: list[dict] = None
@@ -122,11 +132,13 @@ def generate(request: GenerateRequest):
             messages=request.messages,
             k=CONFIG_DATA['rag']['top_k'],
             r=CONFIG_DATA['rag']['relevance_threshold'],
-            llm
+            llm=llm
         )
         context = "/n".join(contexts).strip()
 
-    return {"contexts": context, "chat_history": request.messages[:-1], "question": get_last_user_message(request.messages), "citations": citations}
+    log.info(f"#######ciations########\n{citations}")
+
+    return {"context": context, "question": get_last_user_message(request.messages), "citations": citations}
 
 prompt = ChatPromptTemplate.from_messages([
     ("system","""Use the following context as your learned knowledge, inside <context></context> XML tags.
@@ -142,41 +154,18 @@ prompt = ChatPromptTemplate.from_messages([
 
                 Given the context information, answer the query.
                 Query: """),
-    MessagesPlaceholder(variable_name="history"),
     ("human", "{question}")
 ])
 
 add_routes(
     app,
-    RunnableLambda(generate).with_types(input_type=GenerateRequest),
-    prompt | ChatOpenAI()
+    RunnableLambda(generate).with_types(input_type=GenerateRequest) | prompt | llm | StrOutputParser()
 )
 
-# @app.get("/generate_session_id")
-# def generate_session_id():
-#     return {'session_id': str(uuid.uuid4().hex)}
-
-# LOCK_FILE_PATH = os.path.join(config['api_path'], config['file_db_path'], 'indexing.lock')
-# @app.get("/total_indexing")
-# def indexing(progress: Optional[int] = None):
-#     if progress == 1:
-#         if os.path.exists(LOCK_FILE_PATH):
-#             return {'msg': 'Indexing in progress.'}
-#         else:
-#             return {'msg': 'Indexing not in progress.'}
-        
-#     if os.path.exists(LOCK_FILE_PATH):
-#         return {'msg': 'Indexing in progress.'}
-    
-#     t = threading.Thread(target=async_indexing.async_indexing)
-#     t.start()
-
-#     return {'msg': 'Indexing has started.'}
-
-# @app.post("/get_retriever_result")
-# def get_retriever_result(input: FileProcessingRequest):
-#     return process_file(input)['docs']
-
 if __name__ == "__main__":
+    # stream_hander = logging.StreamHandler()
+    # log.addHandler(stream_hander)
+    # request = GenerateRequest(file_infos=[{'file_id': 'fa3dab54-1bfa-4dc7-a1c4-4b56d6610c21', 'name':'2407.01219v1.pdf'}], messages=[{'role': 'assistant', 'content': 'How can I help you?'}, {'role': 'user', 'content': '논문에서 제시된 vector DB중 어떤것이 가장 좋아?'}])
+    # print(generate(request))
     uvicorn.run('main:app', host="0.0.0.0", port=8080)
     # uvicorn.run('main:app', host="0.0.0.0", port=8080, reload=True)

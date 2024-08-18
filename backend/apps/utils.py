@@ -1,18 +1,20 @@
 import os
 import logging
 import operator
+from tinydb import TinyDB, Query
 from typing import Optional, List, Any, Sequence
-from config import (GLOBAL_LOG_LEVEL, CONFIG_DATA, CHROMA_DATA_PATH, SENTENCE_TRANSFORMERS_HOME)
+from config import (GLOBAL_LOG_LEVEL, CONFIG_DATA, CHROMA_DATA_PATH, SENTENCE_TRANSFORMERS_HOME, DATA_DIR)
 
 import sentence_transformers
 from huggingface_hub import snapshot_download
 
 import chromadb
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import BaseDocumentCompressor, Document
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.callbacks import Callbacks
 
 # log setting
 log = logging.getLogger(__name__)
@@ -20,17 +22,14 @@ log.setLevel(GLOBAL_LOG_LEVEL)
 
 def load_embedding():
     model_name = CONFIG_DATA['rag']['embedding_model']
-    return HuggingFaceEmbeddings(model_name=model_name)
+    return HuggingFaceEmbeddings(model_name=model_name, multi_process=True, model_kwargs = {'device':'cuda'})
 
-def get_model_path(model: str, update_model: bool = False):
+def get_model_path(model: str):
     # Construct huggingface_hub kwargs with local_files_only to return the snapshot path
-    cache_dir = SENTENCE_TRANSFORMERS_HOME
-
-    local_files_only = not update_model
+    cache_dir = os.getenv("SENTENCE_TRANSFORMERS_HOME")
 
     snapshot_kwargs = {
-        "cache_dir": cache_dir,
-        "local_files_only": local_files_only,
+        "cache_dir": cache_dir
     }
 
     log.debug(f"model: {model}")
@@ -40,7 +39,6 @@ def get_model_path(model: str, update_model: bool = False):
     if (
         os.path.exists(model)
         or ("\\" in model or model.count("/") > 1)
-        and local_files_only
     ):
         # If fully qualified path exists, return input, else set repo_id
         return model
@@ -59,9 +57,9 @@ def get_model_path(model: str, update_model: bool = False):
         log.exception(f"Cannot determine model snapshot path: {e}")
         return model
 
-def load_sentence_transformer_rf():
+def load_sentence_transformer(model_path):
     return sentence_transformers.CrossEncoder(
-        get_model_path(CONFIG_DATA['rag']['reranking_model']),
+        get_model_path(model_path),
         device="cuda",
         trust_remote_code=True,
     )
@@ -118,7 +116,50 @@ def get_contextualize_query(llm, query, history):
         ]
     )
 
-    return {"question": query, "chat_history": history} | contextualize_q_prompt | llm | StrOutputParser()
+    chain = contextualize_q_prompt | llm | StrOutputParser()
+
+    return chain.invoke({
+        "question": query,
+        "chat_history": history
+    })
+
+def search_file_db(file_id=None, filename=None, file_size=None):
+    file_info = None
+    try:
+        db = TinyDB(os.path.join(DATA_DIR, 'file_index_db.json'), indent=2)
+        query = Query()
+        if db:
+            if file_id:
+                result = db.search(query.file_id == file_id)
+            elif filename and file_size:
+                result = db.search((query.name == filename) & (query.file_size == file_size))
+
+            if result:
+                file_info = result[0]
+    except Exception as e:
+        print(e)
+    finally:
+        db.close()
+
+    return file_info
+
+def insert_file_db(file_id, filename, file_size):
+    try:
+        db = TinyDB(os.path.join(DATA_DIR, 'file_index_db.json'), indent=2)
+        db.insert({'file_id': file_id, 'name': filename, 'file_size': file_size, 'docs_count': -1})
+    except Exception as e:
+        print(e)
+    finally:
+        db.close()
+
+def update_index_complete(file_id, docs_count):
+    try:
+        db = TinyDB(os.path.join(DATA_DIR, 'file_index_db.json'), indent=2)
+        db.update({'docs_count': docs_count}, Query().file_id==file_id)
+    except Exception as e:
+        print(e)
+    finally:
+        db.close()
 
 class RerankCompressor(BaseDocumentCompressor):
     embedding_function: Any
@@ -134,6 +175,7 @@ class RerankCompressor(BaseDocumentCompressor):
         self,
         documents: Sequence[Document],
         query: str,
+        callbacks: Optional[Callbacks] = None
     ) -> Sequence[Document]:
         reranking = self.reranking_function is not None
 

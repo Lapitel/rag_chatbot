@@ -3,7 +3,7 @@ import logging
 
 from typing import List
 from config import (GLOBAL_LOG_LEVEL, UPLOAD_DIR, CONFIG_DATA, CHROMA_DATA_PATH)
-from utils import load_embedding
+from apps.utils import load_embedding
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
