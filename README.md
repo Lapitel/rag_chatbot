@@ -24,9 +24,9 @@
 
 ### 설치 방법
 1. 저장소를 클론합니다.
-   ```bash
-   git clone https://github.com/Lapitel/rag_chatbot.git
-   ```
+  ```bash
+  git clone https://github.com/Lapitel/rag_chatbot.git
+  ```
 2. 프로젝트 디렉토리로 이동합니다.
   ```bash
   cd rag_chatbot
