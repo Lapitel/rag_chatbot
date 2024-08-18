@@ -9,5 +9,6 @@
         "relevance_threshold": 0.0,
         "embedding_model": "BAAI/bge-m3",
         "reranking_model": "BAAI/bge-reranker-v2-m3"
-    }
+    },
+    "openai_api_key": ""
 }
