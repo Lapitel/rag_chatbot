@@ -25,7 +25,7 @@ def get_split_docs(data: List[Document], filename:str):
     )
     docs = text_splitter.split_documents(data)
     # insert filename to split_docs
-    [setattr(doc, 'page_content', f"{filename}\n{doc.page_content}") for doc in docs]
+    [setattr(doc, 'page_content', f"{filename}\n\n{doc.page_content}") for doc in docs]
 
     return docs
 

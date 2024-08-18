@@ -1,7 +1,16 @@
 import os
 import logging
-import getpass
-os.environ["OPENAI_API_KEY"] = getpass.getpass("OpenAI API Key:")
+from config import (
+    GLOBAL_LOG_LEVEL,
+    UPLOAD_DIR,
+    CONFIG_DATA
+)
+
+if CONFIG_DATA['openai_api_key']:
+    os.environ["OPENAI_API_KEY"] = CONFIG_DATA['openai_api_key']
+else:
+    import getpass
+    os.environ["OPENAI_API_KEY"] = getpass.getpass("OpenAI API Key:")
 
 from fastapi import (
     FastAPI,
@@ -14,17 +23,10 @@ import uuid
 import uvicorn
 from langchain_core.pydantic_v1 import BaseModel
 from langserve import add_routes, CustomUserType
-from langchain.schema.runnable import RunnableLambda
+from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-
-from config import (
-    GLOBAL_LOG_LEVEL,
-    UPLOAD_DIR,
-    CONFIG_DATA,
-    DATA_DIR
-)
 
 from apps import index
 from apps import search
@@ -100,10 +102,10 @@ def indexing(index_params: IndexParams):
         # get loader
         loader = index.get_loader(index_params.file_id, extract_images=index_params.extract_images)
         data = loader.load()
-        log.info(f"indexing() len(data): {len(data)}")
+        # log.info(f"indexing() len(data): {len(data)}")
         # split chunk
         docs = index.get_split_docs(data, index_params.name)
-        log.info(f"indexing() len(docs): {len(docs)}")
+        # log.info(f"indexing() len(docs): {len(docs)}")
         # store vector DB
         index.store_docs_in_vector_db(docs=docs, collection_name=index_params.file_id)
         
@@ -118,11 +120,12 @@ def indexing(index_params: IndexParams):
 
 llm = ChatOpenAI(model="gpt-3.5-turbo")
 # generation parameters
-class GenerateRequest(CustomUserType):
+class SearchRequest(CustomUserType):
     file_infos: list[dict] = None
     messages: list[dict]
 
-def generate(request: GenerateRequest):
+@app.post("/search")
+def searching(request: SearchRequest):
     context = ""
     citations = []
     # search
@@ -135,8 +138,6 @@ def generate(request: GenerateRequest):
             llm=llm
         )
         context = "/n".join(contexts).strip()
-
-    log.info(f"#######ciations########\n{citations}")
 
     return {"context": context, "question": get_last_user_message(request.messages), "citations": citations}
 
@@ -159,7 +160,7 @@ prompt = ChatPromptTemplate.from_messages([
 
 add_routes(
     app,
-    RunnableLambda(generate).with_types(input_type=GenerateRequest) | prompt | llm | StrOutputParser()
+    {'context': RunnablePassthrough(), 'question': RunnablePassthrough()} | prompt | llm | StrOutputParser()
 )
 
 if __name__ == "__main__":

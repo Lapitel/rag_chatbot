@@ -3,11 +3,11 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import json
-import time
 import streamlit as st
 import requests
 import asyncio
 import aiohttp
+import urllib.parse
 
 BACKEND_URL = "http://localhost:8080"
 
@@ -32,7 +32,7 @@ with st.sidebar:
 
         async def upload_file(file):
             async def async_post(session, url, filename, data=None, json=None):
-                async with session.post(url, data=data, json=json, timeout=aiohttp.ClientTimeout(total=600)) as response:
+                async with session.post(url, data=data, json=json, timeout=aiohttp.ClientTimeout(total=6000)) as response:
                     if response.status == 200:
                         return await response.text()
                     else:
@@ -81,6 +81,25 @@ if prompt := st.chat_input():
     with st.spinner('답변 생성중'):
         print(st.session_state.messages)
         print(st.session_state.uploaded_file_ids)
+        searchResult = requests.post(f"{BACKEND_URL}/search",
+                                    json={
+                                        "file_infos": st.session_state.uploaded_file_ids,
+                                        "messages": st.session_state.messages
+                                        }
+                                    )
+        content = json.loads(searchResult.content.decode('utf-8'))
+        tooltips = []
+        for citation in content['citations']:
+            print(citation)
+            if citation['document']:
+                title = urllib.parse.unquote(citation['source'])
+                for i in range(len(citation['document'])):
+                    tooltips.append({
+                        'title': title,
+                        'content': citation['document'][i],
+                        'page': citation['metadata'][i]['page']
+                    })
+
         response = requests.post(f"{BACKEND_URL}/invoke",
                                     json={
                                     "input": {
@@ -100,5 +119,13 @@ if prompt := st.chat_input():
             msg = content['output']
             st.session_state.messages.append({"role": "assistant", "content": msg})
             st.chat_message("assistant").write(msg)
+
+            if len(tooltips)> 0:
+                with st.container():
+                    for idx, tooltip in enumerate(tooltips, start=1):
+                        if tooltip['page'] != None:
+                            st.text(f"[{idx}] {tooltip['title']} ({tooltip['page']}p)", help = tooltip['content'])
+                        else:
+                            st.text(f"[{idx}] {tooltip['title']}", help = tooltip['content'])
         else:
             st.error(response)
